@@ -1,0 +1,63 @@
+# ESP32 + PN532 on the LG DLEX4370K dryer's Tag On logo.
+# Flash: esphome run dryer.yaml (first time over USB, then over Wi-Fi).
+esphome:
+  name: lg-dryer
+  friendly_name: LG Dryer
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+logger:
+
+api:
+  encryption:
+    key: !secret api_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+external_components:
+  - source:
+      type: local
+      path: components
+
+# PN532 switches: I2C mode. Power it from the ESP32's 3V3 pin.
+i2c:
+  sda: GPIO21
+  scl: GPIO22
+  frequency: 100kHz
+
+lg_tagon:
+  # Each poll makes the dryer beep. Raise this if 30 s is too often.
+  update_interval: 30s
+  status:
+    name: Status
+  running:
+    name: Running
+  remaining_time:
+    name: Time remaining
+  initial_time:
+    name: Cycle length
+  course:
+    name: Cycle
+  dry_level:
+    name: Dry level
+  temperature_setting:
+    name: Temperature setting
+  error_code:
+    name: Error code
+  status_code:
+    name: Status code
+  model:
+    name: Model code
+  reachable:
+    name: Tag reachable
+  raw_monitoring:
+    name: Raw monitoring
