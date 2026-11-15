@@ -15,7 +15,8 @@ constexpr size_t IDM_SIZE = 8;
 constexpr size_t BLOCK_SIZE = 16;
 using Idm = std::array<uint8_t, IDM_SIZE>;
 
-// Block addresses the app reads.
+// Block addresses the app reads. It reads the header first on every tag-on.
+constexpr uint8_t HEADER_BLOCK = 0x08;
 constexpr uint8_t MODEL_BLOCK = 0x17;
 constexpr uint8_t MODEL_BLOCKS = 2;
 constexpr uint8_t MODEL_TYPE = 0x15;
@@ -29,6 +30,13 @@ constexpr uint8_t FELICA_READ = 0x06;
 constexpr uint8_t FELICA_READ_RESPONSE = 0x07;
 constexpr uint16_t SERVICE_CODE = 0x0009;
 constexpr size_t MAX_READ_BLOCKS = 4;  // the tag's attribute block: "Maximum blocks to read: 4"
+
+// The third byte of each block list element (NfcFPacket.mode_RF in the app). The app sends 0
+// for the tag's stored data (header, model, history) and 4 for the appliance's live data
+// (command IDs 500 and up: monitoring, options, energy). The dryer refuses a mismatch with
+// status FF A5.
+constexpr uint8_t MEMORY_MODE = 0x00;
+constexpr uint8_t LIVE_MODE = 0x04;
 
 // LG's message checksum: CRC-16/XMODEM (poly 0x1021, init 0), stored low byte first.
 inline uint16_t crc16(const uint8_t *data, size_t size) {
@@ -63,7 +71,8 @@ inline std::optional<Message> parse_message(const uint8_t *data, size_t size, ui
 }
 
 // The FeliCa request, byte for byte as the app builds it: three-byte block list elements.
-inline size_t build_read_request(uint8_t *out, const Idm &idm, uint8_t first_block, uint8_t count) {
+inline size_t build_read_request(uint8_t *out, const Idm &idm, uint8_t first_block, uint8_t count,
+                                 uint8_t mode) {
   size_t n = 0;
   out[n++] = 0;  // length, set below
   out[n++] = FELICA_READ;
@@ -77,7 +86,7 @@ inline size_t build_read_request(uint8_t *out, const Idm &idm, uint8_t first_blo
   for (uint8_t i = 0; i < count; i++) {
     out[n++] = 0x00;  // three-byte element, service index 0
     out[n++] = static_cast<uint8_t>(first_block + i);
-    out[n++] = 0x00;
+    out[n++] = mode;
   }
   out[0] = static_cast<uint8_t>(n);
   return n;

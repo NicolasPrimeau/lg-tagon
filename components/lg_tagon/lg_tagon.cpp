@@ -152,10 +152,10 @@ void LgTagOn::update() {
   this->step_timeout_ = POLL_TIMEOUT_MS;
 }
 
-void LgTagOn::request_blocks_(Step step, uint8_t first, uint8_t count) {
+void LgTagOn::request_blocks_(Step step, uint8_t first, uint8_t count, uint8_t mode) {
   std::vector<uint8_t> command = {CMD_IN_DATA_EXCHANGE, 0x01};
   uint8_t request[::tagon::read_request_size(::tagon::MAX_READ_BLOCKS)];
-  const size_t n = ::tagon::build_read_request(request, this->idm_, first, count);
+  const size_t n = ::tagon::build_read_request(request, this->idm_, first, count, mode);
   command.insert(command.end(), request, request + n);
   if (!this->send_command_(command)) {
     this->finish_(false);
@@ -199,10 +199,17 @@ void LgTagOn::handle_poll_(const std::vector<uint8_t> &response) {
     return;
   }
   std::copy(response.begin() + 4, response.begin() + 12, this->idm_.begin());
+  ESP_LOGD(TAG, "Poll response: %s", format_hex_pretty(response.data(), response.size()).c_str());
+  this->request_blocks_(Step::READ_HEADER, ::tagon::HEADER_BLOCK, 1, ::tagon::MEMORY_MODE);
+}
+
+// After the header, as the app does: the model once, then the live monitoring block.
+void LgTagOn::request_after_header_() {
   if (this->model_known_) {
-    this->request_blocks_(Step::READ_MONITORING, ::tagon::MONITORING_BLOCK, ::tagon::MONITORING_BLOCKS);
+    this->request_blocks_(Step::READ_MONITORING, ::tagon::MONITORING_BLOCK, ::tagon::MONITORING_BLOCKS,
+                          ::tagon::LIVE_MODE);
   } else {
-    this->request_blocks_(Step::READ_MODEL, ::tagon::MODEL_BLOCK, ::tagon::MODEL_BLOCKS);
+    this->request_blocks_(Step::READ_MODEL, ::tagon::MODEL_BLOCK, ::tagon::MODEL_BLOCKS, ::tagon::MEMORY_MODE);
   }
 }
 
@@ -216,8 +223,14 @@ void LgTagOn::handle_blocks_(const std::vector<uint8_t> &response) {
   const auto blocks =
       ::tagon::parse_read_response(response.data() + 1, response.size() - 1, this->blocks_requested_);
   if (!blocks) {
-    ESP_LOGW(TAG, "The appliance refused the read");
+    ESP_LOGW(TAG, "The appliance refused the read of %u block(s): %s", this->blocks_requested_,
+             format_hex_pretty(response.data(), response.size()).c_str());
     this->finish_(false);
+    return;
+  }
+  if (this->step_ == Step::READ_HEADER) {
+    ESP_LOGD(TAG, "Header: %s", format_hex_pretty(blocks->data, blocks->size).c_str());
+    this->request_after_header_();
     return;
   }
   if (this->step_ == Step::READ_MODEL) {
@@ -229,7 +242,8 @@ void LgTagOn::handle_blocks_(const std::vector<uint8_t> &response) {
         this->model_->publish_state(*model);
       }
     }
-    this->request_blocks_(Step::READ_MONITORING, ::tagon::MONITORING_BLOCK, ::tagon::MONITORING_BLOCKS);
+    this->request_blocks_(Step::READ_MONITORING, ::tagon::MONITORING_BLOCK, ::tagon::MONITORING_BLOCKS,
+                          ::tagon::LIVE_MODE);
     return;
   }
   const auto state = ::tagon::decode_dryer(blocks->data, blocks->size);

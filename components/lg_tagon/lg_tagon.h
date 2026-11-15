@@ -36,14 +36,15 @@ class LgTagOn : public PollingComponent, public i2c::I2CDevice {
   void set_reachable_sensor(binary_sensor::BinarySensor *s) { reachable_ = s; }
 
  protected:
-  enum class Step { IDLE, POLL, READ_MODEL, READ_MONITORING };
+  enum class Step { IDLE, POLL, READ_HEADER, READ_MODEL, READ_MONITORING };
 
   bool send_command_(const std::vector<uint8_t> &data);
   bool is_ready_();
   bool wait_ready_(uint32_t timeout_ms);
   bool read_response_(uint8_t command, std::vector<uint8_t> &out);
   bool configure_();
-  void request_blocks_(Step step, uint8_t first, uint8_t count);
+  void request_blocks_(Step step, uint8_t first, uint8_t count, uint8_t mode);
+  void request_after_header_();
   void handle_poll_(const std::vector<uint8_t> &response);
   void handle_blocks_(const std::vector<uint8_t> &response);
   void finish_(bool reachable);

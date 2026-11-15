@@ -59,9 +59,20 @@ static void rejects_a_corrupted_model() {
 static void builds_the_same_request_as_the_lg_app() {
   const Idm idm = {0x02, 0xFE, 0, 0, 0, 0, 0, 0};
   uint8_t out[read_request_size(2)];
-  const size_t n = build_read_request(out, idm, MONITORING_BLOCK, 2);
+  const size_t n = build_read_request(out, idm, MODEL_BLOCK, 2, MEMORY_MODE);
   const uint8_t expected[] = {0x14, 0x06, 0x02, 0xFE, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                              0x01, 0x09, 0x00, 0x02, 0x00, 0x23, 0x00, 0x00, 0x24, 0x00};
+                              0x01, 0x09, 0x00, 0x02, 0x00, 0x17, 0x00, 0x00, 0x18, 0x00};
+  CHECK(n == sizeof(expected));
+  CHECK(std::memcmp(out, expected, sizeof(expected)) == 0);
+}
+
+// The app's live reads (command IDs 500 and up, monitoring is 601) set the mode byte to 4.
+static void a_live_read_sets_the_mode_byte() {
+  const Idm idm = {0x02, 0xFE, 0, 0, 0, 0, 0, 0};
+  uint8_t out[read_request_size(2)];
+  const size_t n = build_read_request(out, idm, MONITORING_BLOCK, 2, LIVE_MODE);
+  const uint8_t expected[] = {0x14, 0x06, 0x02, 0xFE, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                              0x01, 0x09, 0x00, 0x02, 0x00, 0x23, 0x04, 0x00, 0x24, 0x04};
   CHECK(n == sizeof(expected));
   CHECK(std::memcmp(out, expected, sizeof(expected)) == 0);
 }
@@ -123,6 +134,7 @@ int main() {
   reads_the_model_code();
   rejects_a_corrupted_model();
   builds_the_same_request_as_the_lg_app();
+  a_live_read_sets_the_mode_byte();
   decodes_a_running_dryer();
   a_finished_dryer_is_not_running();
   rejects_monitoring_with_a_bad_crc();
