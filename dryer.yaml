@@ -1,5 +1,6 @@
 # ESP32 + PN532 on the LG DLEX4370K dryer's Tag On logo.
-# Flash: esphome run dryer.yaml (first time over USB, then over Wi-Fi).
+# First flash: the factory .bin through web.esphome.io in Chrome or Edge, which then asks for
+# the Wi-Fi network (Improv). Later updates: esphome run dryer.yaml, over Wi-Fi.
 esphome:
   name: lg-dryer
   friendly_name: LG Dryer
@@ -19,9 +20,14 @@ ota:
   - platform: esphome
     password: !secret ota_password
 
+# No network baked in: Improv (over USB) or the fallback hotspot sets it, and it is kept in flash.
 wifi:
-  ssid: !secret wifi_ssid
-  password: !secret wifi_password
+  ap:
+    ssid: LG Dryer Setup
+
+captive_portal:
+
+improv_serial:
 
 external_components:
   - source:
