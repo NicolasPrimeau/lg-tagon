@@ -1,0 +1,77 @@
+# ESP32 + PN532 on the LG WM4370HKA washer's Tag On logo.
+# First flash: the factory .bin through web.esphome.io in Chrome or Edge, which then asks for
+# the Wi-Fi network (Improv). Later updates: esphome run dryer.yaml, over Wi-Fi.
+esphome:
+  name: lg-washer
+  friendly_name: LG Washer
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+logger:
+
+api:
+  encryption:
+    key: !secret api_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+# No network baked in: Improv (over USB) or the fallback hotspot sets it, and it is kept in flash.
+wifi:
+  ap:
+    ssid: LG Washer Setup
+
+captive_portal:
+
+improv_serial:
+
+external_components:
+  - source:
+      type: local
+      path: components
+
+# PN532 switches: I2C mode. Power it from the ESP32's 3V3 pin.
+i2c:
+  sda: GPIO21
+  scl: GPIO22
+  frequency: 100kHz
+
+lg_tagon:
+  # Each poll may make the washer beep. Raise this if 30 s is too often.
+  update_interval: 30s
+  status:
+    name: Status
+  running:
+    name: Running
+  remaining_time:
+    name: Time remaining
+  initial_time:
+    name: Cycle length
+  course:
+    name: Cycle
+  soil_level:
+    name: Soil level
+  spin_speed:
+    name: Spin speed
+  water_temperature:
+    name: Water temperature
+  rinse:
+    name: Rinse
+  door_lock:
+    name: Door locked
+  child_lock:
+    name: Child lock
+  error_code:
+    name: Error code
+  status_code:
+    name: Status code
+  model:
+    name: Model code
+  reachable:
+    name: Tag reachable
+  raw_monitoring:
+    name: Raw monitoring

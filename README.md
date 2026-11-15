@@ -1,7 +1,9 @@
 # lg-tagon
 
-Home Assistant for a 2016-era LG dryer (DLEX4370K) through its "Tag On" NFC logo: an ESP32 and a
-PN532 reader stuck on the logo read the dryer's live state and publish it over ESPHome. No cloud.
+Home Assistant for 2016-era LG laundry (DLEX4370K dryer, WM4370HKA washer) through the "Tag On" NFC
+logo: an ESP32 and a PN532 reader stuck on the logo read the machine's live state and publish it
+over ESPHome. No cloud. One firmware serves both; it tells the machine from the model code on its
+tag. Configs: `dryer.yaml`, `washer.yaml`.
 
 What the dryer exposes, and how it was found: [docs/protocol.md](docs/protocol.md).
 
@@ -28,16 +30,21 @@ Stick the PN532 with its antenna side flat on the Tag On logo.
 ## Flash
 
 ```bash
-cp secrets.yaml.example secrets.yaml   # fill in Wi-Fi and keys
-uvx esphome run dryer.yaml             # first time over USB; later over Wi-Fi
+cp secrets.yaml.example secrets.yaml   # fill in the keys
+uvx esphome compile dryer.yaml         # or washer.yaml
 ```
+
+First flash: write `.esphome/build/lg-dryer/build/firmware.factory.bin` at 0x0 (web.esphome.io or
+`esptool write_flash 0x0`), then join the "LG Dryer Setup" hotspot to give it your Wi-Fi. Later
+updates go over Wi-Fi: `uvx esphome upload dryer.yaml --device <ip>`.
 
 Home Assistant discovers the device; add it with the `api_key` from `secrets.yaml`.
 
 ## Entities
 
-Status (Off, Dry, Cooling, End, ...), Running, Time remaining, Cycle length, Cycle, Dry level,
-Temperature setting, Error code, plus diagnostics: Status code, Model code, Tag reachable and
+Status (Off, Dry, Washing, Spinning, End, ...), Running, Time remaining, Cycle length, Cycle,
+Child lock, Error code; dryer: Dry level, Temperature setting; washer: Soil level, Spin speed,
+Water temperature, Rinse, Door locked; plus diagnostics: Status code, Model code, Tag reachable and
 Raw monitoring (hex, for decoding fields not mapped yet).
 
 ## Tests

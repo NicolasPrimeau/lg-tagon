@@ -1,4 +1,8 @@
-"""ESPHome config for the LG Tag On component: a PN532 on I2C reading an LG dryer."""
+"""ESPHome config for the LG Tag On component: a PN532 on I2C reading an LG washer or dryer.
+
+The component tells the machine from the model code on its tag; settings that do not apply to
+that machine stay unpublished.
+"""
 
 import esphome.codegen as cg
 import esphome.config_validation as cv
@@ -17,6 +21,7 @@ DEPENDENCIES = ["i2c"]
 AUTO_LOAD = ["sensor", "text_sensor", "binary_sensor"]
 
 lg_tagon_ns = cg.esphome_ns.namespace("lg_tagon")
+Field = cg.global_ns.namespace("tagon").enum("Field", is_class=True)
 LgTagOn = lg_tagon_ns.class_("LgTagOn", cg.PollingComponent, i2c.I2CDevice)
 
 _minutes = sensor.sensor_schema(
@@ -31,7 +36,7 @@ _diagnostic_code = sensor.sensor_schema(
 )
 
 TEXT_SENSORS = {
-    "status": text_sensor.text_sensor_schema(icon="mdi:tumble-dryer"),
+    "status": text_sensor.text_sensor_schema(),
     "model": text_sensor.text_sensor_schema(entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
     "raw_monitoring": text_sensor.text_sensor_schema(
         entity_category=ENTITY_CATEGORY_DIAGNOSTIC
@@ -43,11 +48,21 @@ SENSORS = {
     "initial_time": _minutes,
     "course": _code,
     "error_code": _diagnostic_code,
-    "dry_level": _code,
-    "temperature_setting": _code,
+}
+# Machine-specific settings, as the app's index numbers.
+FIELDS = {
+    "dry_level": "DRY_LEVEL",
+    "temperature_setting": "DRYER_TEMPERATURE",
+    "soil_level": "SOIL_LEVEL",
+    "spin_speed": "SPIN",
+    "water_temperature": "WATER_TEMPERATURE",
+    "rinse": "RINSE",
 }
 BINARY_SENSORS = {
     "running": binary_sensor.binary_sensor_schema(device_class=DEVICE_CLASS_RUNNING),
+    # Home Assistant's lock class reads on as "Unlocked", so the firmware publishes "locked".
+    "door_lock": binary_sensor.binary_sensor_schema(icon="mdi:lock"),
+    "child_lock": binary_sensor.binary_sensor_schema(icon="mdi:lock-outline"),
     "reachable": binary_sensor.binary_sensor_schema(
         device_class=DEVICE_CLASS_CONNECTIVITY,
         entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
@@ -63,9 +78,9 @@ SETTERS = {
     "initial_time": "set_initial_sensor",
     "course": "set_course_sensor",
     "error_code": "set_error_sensor",
-    "dry_level": "set_dry_level_sensor",
-    "temperature_setting": "set_temperature_sensor",
     "running": "set_running_sensor",
+    "door_lock": "set_door_lock_sensor",
+    "child_lock": "set_child_lock_sensor",
     "reachable": "set_reachable_sensor",
 }
 
@@ -75,6 +90,7 @@ CONFIG_SCHEMA = (
             cv.GenerateID(): cv.declare_id(LgTagOn),
             **{cv.Optional(key): schema for key, schema in TEXT_SENSORS.items()},
             **{cv.Optional(key): schema for key, schema in SENSORS.items()},
+            **{cv.Optional(key): _code for key in FIELDS},
             **{cv.Optional(key): schema for key, schema in BINARY_SENSORS.items()},
         }
     )
@@ -97,3 +113,7 @@ async def to_code(config):
         else:
             entity = await binary_sensor.new_binary_sensor(config[key])
         cg.add(getattr(var, setter)(entity))
+    for key, field in FIELDS.items():
+        if key in config:
+            entity = await sensor.new_sensor(config[key])
+            cg.add(var.set_field_sensor(getattr(Field, field), entity))

@@ -264,13 +264,24 @@ void LgTagOn::handle_blocks_(const std::vector<uint8_t> &response) {
   }
   if (this->step_ == Step::READ_HEADER) {
     ESP_LOGD(TAG, "Header: %s", format_hex_pretty(blocks->data, blocks->size).c_str());
+    const auto header = ::tagon::parse_header(blocks->data, blocks->size);
+    if (header && !header->powered) {
+      // Only the header answers while the machine is off; say so instead of failing reads.
+      this->publish_off_();
+      this->finish_(true);
+      return;
+    }
     this->request_after_header_();
     return;
   }
   if (this->step_ == Step::READ_MODEL) {
     const auto model = ::tagon::decode_model(blocks->data, blocks->size);
     if (model) {
-      ESP_LOGI(TAG, "Appliance model code %s", model->c_str());
+      this->appliance_ = ::tagon::appliance_from_model(*model);
+      ESP_LOGI(TAG, "Appliance model code %s (%s)", model->c_str(),
+               this->appliance_ == ::tagon::Appliance::WASHER  ? "washer"
+               : this->appliance_ == ::tagon::Appliance::DRYER ? "dryer"
+                                                               : "unknown machine");
       this->model_known_ = true;
       if (this->model_ != nullptr) {
         this->model_->publish_state(*model);
@@ -280,7 +291,7 @@ void LgTagOn::handle_blocks_(const std::vector<uint8_t> &response) {
                           ::tagon::LIVE_MODE);
     return;
   }
-  const auto state = ::tagon::decode_dryer(blocks->data, blocks->size);
+  const auto state = ::tagon::decode_monitoring(blocks->data, blocks->size);
   if (this->raw_ != nullptr) {
     this->raw_->publish_state(format_hex_pretty(blocks->data, blocks->size));
   }
@@ -293,35 +304,50 @@ void LgTagOn::handle_blocks_(const std::vector<uint8_t> &response) {
   this->finish_(true);
 }
 
-void LgTagOn::publish_state_(const ::tagon::DryerState &state) {
-  ESP_LOGD(TAG, "Status %u (%s), %u min left, course %u, error %u", state.status,
-           ::tagon::dryer_status_name(state.status), state.remaining_minutes, state.course, state.error);
+void LgTagOn::publish_state_(const ::tagon::Monitoring &state) {
+  const char *name = ::tagon::status_name(this->appliance_, state.status);
+  ESP_LOGD(TAG, "Status %u (%s), %u min left, course %u, error %u", state.status, name, state.remaining_minutes,
+           state.course, state.error);
   if (this->status_ != nullptr) {
-    this->status_->publish_state(::tagon::dryer_status_name(state.status));
+    this->status_->publish_state(name);
   }
-  if (this->status_code_ != nullptr) {
-    this->status_code_->publish_state(state.status);
+  const std::pair<sensor::Sensor *, float> common[] = {
+      {this->status_code_, state.status}, {this->remaining_, state.remaining_minutes},
+      {this->initial_, state.initial_minutes}, {this->course_, state.course}, {this->error_, state.error},
+  };
+  for (const auto &c : common) {
+    if (c.first != nullptr) {
+      c.first->publish_state(c.second);
+    }
   }
-  if (this->remaining_ != nullptr) {
-    this->remaining_->publish_state(state.remaining_minutes);
-  }
-  if (this->initial_ != nullptr) {
-    this->initial_->publish_state(state.initial_minutes);
-  }
-  if (this->course_ != nullptr) {
-    this->course_->publish_state(state.course);
-  }
-  if (this->error_ != nullptr) {
-    this->error_->publish_state(state.error);
-  }
-  if (this->dry_level_ != nullptr) {
-    this->dry_level_->publish_state(state.dry_level);
-  }
-  if (this->temperature_ != nullptr) {
-    this->temperature_->publish_state(state.temperature);
+  for (size_t i = 0; i < this->fields_.size(); i++) {
+    const auto value = ::tagon::field_value(this->appliance_, static_cast<::tagon::Field>(i), state);
+    if (this->fields_[i] != nullptr && value) {
+      this->fields_[i]->publish_state(*value);
+    }
   }
   if (this->running_ != nullptr) {
-    this->running_->publish_state(::tagon::dryer_is_running(state.status));
+    this->running_->publish_state(::tagon::is_running(this->appliance_, state.status));
+  }
+  if (this->child_lock_ != nullptr) {
+    this->child_lock_->publish_state(::tagon::child_locked(state));
+  }
+  const auto door = ::tagon::door_locked(this->appliance_, state);
+  if (this->door_lock_ != nullptr && door) {
+    this->door_lock_->publish_state(*door);
+  }
+}
+
+void LgTagOn::publish_off_() {
+  ESP_LOGD(TAG, "Machine is off");
+  if (this->status_ != nullptr) {
+    this->status_->publish_state("Off");
+  }
+  if (this->remaining_ != nullptr) {
+    this->remaining_->publish_state(0);
+  }
+  if (this->running_ != nullptr) {
+    this->running_->publish_state(false);
   }
 }
 

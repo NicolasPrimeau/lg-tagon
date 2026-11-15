@@ -3,6 +3,7 @@
 // (about 0.5 s) never blocks ESPHome.
 #pragma once
 
+#include <array>
 #include <vector>
 
 #include "esphome/components/binary_sensor/binary_sensor.h"
@@ -30,9 +31,10 @@ class LgTagOn : public PollingComponent, public i2c::I2CDevice {
   void set_initial_sensor(sensor::Sensor *s) { initial_ = s; }
   void set_course_sensor(sensor::Sensor *s) { course_ = s; }
   void set_error_sensor(sensor::Sensor *s) { error_ = s; }
-  void set_dry_level_sensor(sensor::Sensor *s) { dry_level_ = s; }
-  void set_temperature_sensor(sensor::Sensor *s) { temperature_ = s; }
+  void set_field_sensor(::tagon::Field field, sensor::Sensor *s) { fields_[static_cast<size_t>(field)] = s; }
   void set_running_sensor(binary_sensor::BinarySensor *s) { running_ = s; }
+  void set_door_lock_sensor(binary_sensor::BinarySensor *s) { door_lock_ = s; }
+  void set_child_lock_sensor(binary_sensor::BinarySensor *s) { child_lock_ = s; }
   void set_reachable_sensor(binary_sensor::BinarySensor *s) { reachable_ = s; }
 
  protected:
@@ -48,9 +50,10 @@ class LgTagOn : public PollingComponent, public i2c::I2CDevice {
   void handle_poll_(const std::vector<uint8_t> &response);
   void handle_blocks_(const std::vector<uint8_t> &response);
   void finish_(bool reachable);
+  void publish_off_();
   void lose_link_(const char *why);
   void abort_();
-  void publish_state_(const ::tagon::DryerState &state);
+  void publish_state_(const ::tagon::Monitoring &state);
 
   Step step_{Step::IDLE};
   uint32_t step_started_{0};
@@ -58,6 +61,7 @@ class LgTagOn : public PollingComponent, public i2c::I2CDevice {
   uint8_t blocks_requested_{0};
   ::tagon::Idm idm_{};
   bool model_known_{false};
+  ::tagon::Appliance appliance_{::tagon::Appliance::UNKNOWN};
   bool configured_{false};
 
   text_sensor::TextSensor *status_{nullptr};
@@ -68,9 +72,10 @@ class LgTagOn : public PollingComponent, public i2c::I2CDevice {
   sensor::Sensor *initial_{nullptr};
   sensor::Sensor *course_{nullptr};
   sensor::Sensor *error_{nullptr};
-  sensor::Sensor *dry_level_{nullptr};
-  sensor::Sensor *temperature_{nullptr};
+  std::array<sensor::Sensor *, ::tagon::FIELD_COUNT> fields_{};
   binary_sensor::BinarySensor *running_{nullptr};
+  binary_sensor::BinarySensor *door_lock_{nullptr};
+  binary_sensor::BinarySensor *child_lock_{nullptr};
   binary_sensor::BinarySensor *reachable_{nullptr};
 };
 

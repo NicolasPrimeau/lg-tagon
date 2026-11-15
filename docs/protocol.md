@@ -22,7 +22,14 @@ beyond the owner's manual.
   read time suggest the appliance's controller answers reads itself (FeliCa Plug style), so reads
   should be live. Not yet proven: compare two monitoring reads during a cycle.
 - Read: FeliCa Read Without Encryption, command `0x06`, one service `0x0009`, three-byte block list
-  elements `00 <block> 00`. Write: command `0x08`, same addressing. At most 4 blocks per read.
+  elements `00 <block> <mode>`. Write: command `0x08`, same addressing. At most 4 blocks per read.
+- The mode byte (`NfcFPacket.mode_RF`) is 0 for stored data (header, model, history) and 4 for live
+  data (app command IDs 500 and up: monitoring, options, energy). The dryer refuses a monitoring
+  read with mode 0 (status `FF A5`).
+- The app reads the header (block 0x08) first on every tag-on; do the same.
+- LG status pairs in the response: `FF 50` no answer from the machine (it is off), `FF 51` host
+  error, `FF A5` refused, `FF 60` bad response.
+- Confirmed live on 2026-11-15: two reads a minute apart counted the remaining time down.
 
 ## Messages
 
@@ -32,11 +39,11 @@ model block of the dump.
 
 | Block(s) | Type | Contents |
 |---|---|---|
-| 0x08 | header | LG header, read first by the app |
+| 0x08 | header | `83 76 22 03 ...`; byte 5 is the device state: high nibble 3, bit 1 powered on, bit 0 error (`32` drying, `30` off). Readable while the machine is off; nothing else is |
 | 0x09-0x0D | | Diagnosis (5 blocks) |
 | 0x0E | | Current downloaded cycle |
 | 0x0F-0x15 | | Use history: up to 10 records of 9 bytes + CRC, no type/length |
-| 0x17-0x18 | 0x15 | Model code, 20 bytes NUL padded: `RV13B2AS_D_US` |
+| 0x17-0x18 | | Model code: `[length][name][crc]`, CRC over length and name. Dryer `RV13B2AS_D_US` (name prefixed by 0x14, NUL padded), washer `FH4F2CDYP3_WO_US` |
 | 0x22 | 0x22 | Detergent guide (washers) |
 | 0x23-0x24 | 0x23 | **Monitoring, live state, 28-byte payload** |
 | 0x24 | 0x24 | Cycle control (write; overlaps the monitoring read, so likely a mailbox) |
@@ -72,8 +79,26 @@ The app maps model codes `RV13xx_D_US` to the dryer tables; `RV13B2AS_D_US` is n
 and absent from its list, so the layout above is the family's, not confirmed for this model.
 Cycle and error names are not in this app version; they are published as numbers.
 
+## Monitoring payload (washer)
+
+Bytes 0-6 and 12-16 as for the dryer. Washer status codes (`USVictor27_ListStatus`): 0 off,
+5 initial, 6 pause, 7 error, 10 delay start, 20 detecting, 21 adding water, 22 detergent,
+23 washing, 25 shoes, 30 rinsing, 31 rinse hold, 40 spinning, 50 drying, 60 end, 61 tumbling,
+70/71 steam, 80-82 counters and tub clean alarms, 90 motor test. The app maps
+`FH4F2CDYP3_WO_US` (WM4370HKA) to these tables.
+
+| Byte | Field |
+|---|---|
+| 7 | Soil level (wash) |
+| 8 | Spin |
+| 9 | Water temperature |
+| 10 | Rinse |
+| 11 | Dry level (combo models) |
+| 14 | Flags: bit 0 child lock, bit 3 door lock, bit 5 detergent, bit 6 drum light |
+| 24 | Water flow |
+| 25 | Soak |
+
 ## Open questions
 
-- Is monitoring live during a cycle? Read it twice a few minutes apart while drying.
 - Does every poll beep? If so, poll only while the dryer draws power or vibrates.
-- The washer: model and tag type unknown. Scan it with the Pixel.
+- The washer's monitoring layout is the app's, not yet confirmed against a live read.

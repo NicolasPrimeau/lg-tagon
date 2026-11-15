@@ -57,6 +57,8 @@ lg_tagon:
     name: Dry level
   temperature_setting:
     name: Temperature setting
+  child_lock:
+    name: Child lock
   error_code:
     name: Error code
   status_code:
