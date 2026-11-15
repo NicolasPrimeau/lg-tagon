@@ -41,20 +41,28 @@ bool LgTagOn::send_command_(const std::vector<uint8_t> &data) {
   }
   frame.push_back(static_cast<uint8_t>(-sum));
   frame.push_back(0x00);
-  if (this->write(frame.data(), frame.size()) != i2c::ERROR_OK) {
+  const auto written = this->write(frame.data(), frame.size());
+  if (written != i2c::ERROR_OK) {
+    ESP_LOGW(TAG, "Command 0x%02X: I2C write error %d", data[0], written);
     return false;
   }
   // The PN532 acknowledges every command before it starts working on it.
   if (!this->wait_ready_(READY_TIMEOUT_MS)) {
-    ESP_LOGW(TAG, "No acknowledgement from the PN532");
+    uint8_t status = 0xEE;
+    const auto err = this->read(&status, 1);
+    ESP_LOGW(TAG, "Command 0x%02X: no acknowledgement (status read error %d, status 0x%02X)", data[0], err,
+             status);
     return false;
   }
   uint8_t ack[7];
-  if (this->read(ack, sizeof(ack)) != i2c::ERROR_OK) {
+  const auto err = this->read(ack, sizeof(ack));
+  static const uint8_t EXPECTED[] = {0x00, 0x00, 0xFF, 0x00, 0xFF, 0x00};
+  if (err != i2c::ERROR_OK || memcmp(ack + 1, EXPECTED, sizeof(EXPECTED)) != 0) {
+    ESP_LOGW(TAG, "Command 0x%02X: bad acknowledgement (error %d): %s", data[0], err,
+             format_hex_pretty(ack, sizeof(ack)).c_str());
     return false;
   }
-  static const uint8_t EXPECTED[] = {0x00, 0x00, 0xFF, 0x00, 0xFF, 0x00};
-  return memcmp(ack + 1, EXPECTED, sizeof(EXPECTED)) == 0;
+  return true;
 }
 
 // Reads a response frame whose ready bit is already set. `out` gets the bytes after the
@@ -103,7 +111,20 @@ bool LgTagOn::wait_ready_(uint32_t timeout_ms) {
   return true;
 }
 
+// Sending an ACK frame makes the PN532 drop whatever command it is still working on, so a
+// timeout or a reboot of the ESP32 alone (the PN532 keeps its state) cannot leave it stuck.
+void LgTagOn::abort_() {
+  static const uint8_t ACK[] = {0x00, 0x00, 0xFF, 0x00, 0xFF, 0x00};
+  this->write(ACK, sizeof(ACK));
+  delay(5);
+  uint8_t discard[MAX_FRAME + 1];
+  if (this->is_ready_()) {
+    this->read(discard, sizeof(discard));
+  }
+}
+
 bool LgTagOn::configure_() {
+  this->abort_();
   const std::vector<std::vector<uint8_t>> commands = {
       {CMD_GET_FIRMWARE},
       // Normal mode, no virtual card timeout, IRQ pin used.
@@ -118,8 +139,11 @@ bool LgTagOn::configure_() {
   };
   for (const auto &command : commands) {
     std::vector<uint8_t> response;
-    if (!this->send_command_(command) || !this->wait_ready_(READY_TIMEOUT_MS) ||
-        !this->read_response_(command[0], response)) {
+    if (!this->send_command_(command)) {
+      return false;
+    }
+    if (!this->wait_ready_(READY_TIMEOUT_MS) || !this->read_response_(command[0], response)) {
+      ESP_LOGW(TAG, "Command 0x%02X: no response", command[0]);
       return false;
     }
     if (command[0] == CMD_GET_FIRMWARE && response.size() >= 3) {
@@ -130,21 +154,32 @@ bool LgTagOn::configure_() {
 }
 
 void LgTagOn::setup() {
-  // The first command wakes a sleeping PN532 and can fail.
-  if (!this->configure_() && !this->configure_()) {
-    this->mark_failed();
-    return;
+  // The first command wakes a sleeping PN532 and can fail. If both tries fail, update()
+  // keeps trying, so a slow or busy PN532 at boot is not fatal.
+  this->configured_ = this->configure_() || this->configure_();
+  if (!this->configured_) {
+    ESP_LOGW(TAG, "PN532 not responding yet; will retry");
   }
-  this->configured_ = true;
 }
 
 void LgTagOn::update() {
-  if (!this->configured_ || this->step_ != Step::IDLE) {
+  if (this->step_ != Step::IDLE) {
     return;
+  }
+  if (!this->configured_) {
+    this->configured_ = this->configure_();
+    if (!this->configured_) {
+      ESP_LOGW(TAG, "PN532 not responding; check wiring and that its switches select I2C");
+      if (this->reachable_ != nullptr) {
+        this->reachable_->publish_state(false);
+      }
+      return;
+    }
+    ESP_LOGI(TAG, "PN532 link restored");
   }
   // FeliCa at 212 kbit/s, polling any system code, asking for the system code back.
   if (!this->send_command_({CMD_IN_LIST_PASSIVE_TARGET, 0x01, 0x01, 0x00, 0xFF, 0xFF, 0x01, 0x00})) {
-    this->finish_(false);
+    this->lose_link_("poll not acknowledged");
     return;
   }
   this->step_ = Step::POLL;
@@ -158,7 +193,7 @@ void LgTagOn::request_blocks_(Step step, uint8_t first, uint8_t count, uint8_t m
   const size_t n = ::tagon::build_read_request(request, this->idm_, first, count, mode);
   command.insert(command.end(), request, request + n);
   if (!this->send_command_(command)) {
-    this->finish_(false);
+    this->lose_link_("read not acknowledged");
     return;
   }
   this->blocks_requested_ = count;
@@ -173,15 +208,14 @@ void LgTagOn::loop() {
   }
   if (!this->is_ready_()) {
     if (millis() - this->step_started_ > this->step_timeout_) {
-      ESP_LOGW(TAG, "Timed out waiting for the appliance");
-      this->finish_(false);
+      this->lose_link_("timed out waiting for the appliance");
     }
     return;
   }
   const uint8_t command = this->step_ == Step::POLL ? CMD_IN_LIST_PASSIVE_TARGET : CMD_IN_DATA_EXCHANGE;
   std::vector<uint8_t> response;
   if (!this->read_response_(command, response)) {
-    this->finish_(false);
+    this->lose_link_("unreadable response");
     return;
   }
   if (this->step_ == Step::POLL) {
@@ -298,9 +332,19 @@ void LgTagOn::finish_(bool reachable) {
   }
   // Turn the field off between polls; the next InListPassiveTarget turns it back on.
   std::vector<uint8_t> response;
-  if (this->send_command_({CMD_RF_CONFIGURATION, 0x01, 0x00}) &&
-      this->wait_ready_(READY_TIMEOUT_MS)) {
-    this->read_response_(CMD_RF_CONFIGURATION, response);
+  if (!this->send_command_({CMD_RF_CONFIGURATION, 0x01, 0x00}) || !this->wait_ready_(READY_TIMEOUT_MS) ||
+      !this->read_response_(CMD_RF_CONFIGURATION, response)) {
+    this->lose_link_("field off not confirmed");
+  }
+}
+
+// The PN532 may still be mid-command or holding a reply: reset it on the next update.
+void LgTagOn::lose_link_(const char *why) {
+  ESP_LOGW(TAG, "PN532 exchange failed (%s); resetting it", why);
+  this->step_ = Step::IDLE;
+  this->configured_ = false;
+  if (this->reachable_ != nullptr) {
+    this->reachable_->publish_state(false);
   }
 }
 
@@ -308,8 +352,8 @@ void LgTagOn::dump_config() {
   ESP_LOGCONFIG(TAG, "LG Tag On:");
   LOG_I2C_DEVICE(this);
   LOG_UPDATE_INTERVAL(this);
-  if (this->is_failed()) {
-    ESP_LOGE(TAG, "  PN532 not found; check wiring and that its switches select I2C");
+  if (!this->configured_) {
+    ESP_LOGW(TAG, "  PN532 not responding; check wiring and that its switches select I2C");
   }
 }
 
