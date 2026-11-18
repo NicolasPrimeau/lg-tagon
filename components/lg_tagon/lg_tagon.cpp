@@ -170,9 +170,7 @@ void LgTagOn::update() {
     this->configured_ = this->configure_();
     if (!this->configured_) {
       ESP_LOGW(TAG, "PN532 not responding; check wiring and that its switches select I2C");
-      if (this->reachable_ != nullptr) {
-        this->reachable_->publish_state(false);
-      }
+      this->record_reachable_(false);
       return;
     }
     ESP_LOGI(TAG, "PN532 link restored");
@@ -351,11 +349,16 @@ void LgTagOn::publish_off_() {
   }
 }
 
-void LgTagOn::finish_(bool reachable) {
-  this->step_ = Step::IDLE;
-  if (this->reachable_ != nullptr) {
+void LgTagOn::record_reachable_(bool answered) {
+  const bool reachable = this->reachability_.record(answered);
+  if (this->reachable_ != nullptr && (!this->reachable_->has_state() || this->reachable_->state != reachable)) {
     this->reachable_->publish_state(reachable);
   }
+}
+
+void LgTagOn::finish_(bool reachable) {
+  this->step_ = Step::IDLE;
+  this->record_reachable_(reachable);
   // Turn the field off between polls; the next InListPassiveTarget turns it back on.
   std::vector<uint8_t> response;
   if (!this->send_command_({CMD_RF_CONFIGURATION, 0x01, 0x00}) || !this->wait_ready_(READY_TIMEOUT_MS) ||
@@ -369,9 +372,7 @@ void LgTagOn::lose_link_(const char *why) {
   ESP_LOGW(TAG, "PN532 exchange failed (%s); resetting it", why);
   this->step_ = Step::IDLE;
   this->configured_ = false;
-  if (this->reachable_ != nullptr) {
-    this->reachable_->publish_state(false);
-  }
+  this->record_reachable_(false);
 }
 
 void LgTagOn::dump_config() {

@@ -211,6 +211,23 @@ static void rejects_a_felica_error_status() {
   CHECK(!parse_read_response(r.data(), r.size(), 2).has_value());
 }
 
+static void one_missed_poll_keeps_the_tag_reachable() {
+  Reachability r;
+  CHECK(r.record(true));
+  CHECK(r.record(false));
+  CHECK(r.record(false));
+  CHECK(!r.record(false));
+  CHECK(!r.record(false));
+  CHECK(r.record(true));
+  CHECK(r.record(false));
+}
+
+static void starts_unreachable_until_a_read_works() {
+  Reachability r;
+  CHECK(!r.record(false));
+  CHECK(r.record(true));
+}
+
 int main() {
   crc_matches_the_dryers_own_records();
   reads_the_model_code();
@@ -228,6 +245,8 @@ int main() {
   rejects_another_message_type();
   parses_a_felica_read_response();
   rejects_a_felica_error_status();
+  one_missed_poll_keeps_the_tag_reachable();
+  starts_unreachable_until_a_read_works();
   if (failures != 0) {
     std::printf("%d check(s) failed\n", failures);
     return 1;

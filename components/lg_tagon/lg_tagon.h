@@ -50,6 +50,7 @@ class LgTagOn : public PollingComponent, public i2c::I2CDevice {
   void handle_poll_(const std::vector<uint8_t> &response);
   void handle_blocks_(const std::vector<uint8_t> &response);
   void finish_(bool reachable);
+  void record_reachable_(bool answered);
   void publish_off_();
   void lose_link_(const char *why);
   void abort_();
@@ -63,6 +64,7 @@ class LgTagOn : public PollingComponent, public i2c::I2CDevice {
   bool model_known_{false};
   ::tagon::Appliance appliance_{::tagon::Appliance::UNKNOWN};
   bool configured_{false};
+  ::tagon::Reachability reachability_;
 
   text_sensor::TextSensor *status_{nullptr};
   text_sensor::TextSensor *model_{nullptr};

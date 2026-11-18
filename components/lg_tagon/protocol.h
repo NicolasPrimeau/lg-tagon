@@ -248,6 +248,27 @@ inline std::optional<bool> door_locked(Appliance appliance, const Monitoring &m)
   return (m.payload[FLAGS_BYTE] & 0x08) != 0;
 }
 
+// Whether to report the tag as reachable. The dryer's tag misses a poll now and then and
+// answers the next one, so only several misses in a row count as losing it.
+class Reachability {
+ public:
+  static constexpr uint8_t MISSES_BEFORE_UNREACHABLE = 3;
+
+  bool record(bool answered) {
+    if (answered) {
+      misses_ = 0;
+      seen_ = true;
+    } else if (misses_ < MISSES_BEFORE_UNREACHABLE) {
+      misses_++;
+    }
+    return seen_ && misses_ < MISSES_BEFORE_UNREACHABLE;
+  }
+
+ private:
+  uint8_t misses_{0};
+  bool seen_{false};
+};
+
 // The model block is [length][name][crc low][crc high], CRC over length and name
 // (CommonCommand.get_ModelName). The dryer's name starts with a 0x14 byte; skip control bytes.
 inline std::optional<std::string> decode_model(const uint8_t *data, size_t size) {
