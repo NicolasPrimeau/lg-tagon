@@ -59,6 +59,7 @@ class LgTagOn : public PollingComponent, public i2c::I2CDevice {
   Step step_{Step::IDLE};
   uint32_t step_started_{0};
   uint32_t step_timeout_{0};
+  uint32_t last_status_check_{0};
   uint8_t blocks_requested_{0};
   ::tagon::Idm idm_{};
   bool model_known_{false};

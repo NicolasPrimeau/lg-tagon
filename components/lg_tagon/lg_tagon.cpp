@@ -34,6 +34,11 @@ static constexpr uint32_t POLL_TIMEOUT_MS = 1000;
 // The tag answers a read in 154.62 ms x (1 + blocks); allow for retries.
 static constexpr uint32_t READ_TIMEOUT_MS = 2500;
 static constexpr size_t MAX_FRAME = 96;
+// How often to ask the PN532 whether it has finished. Each check is an I2C read, and reads
+// while it works on a command are when it stretches the clock; the one recorded freeze began
+// with such a read timing out. A command takes a few ms and a read hundreds, so 10 ms costs
+// little.
+static constexpr uint32_t STATUS_INTERVAL_MS = 10;
 
 bool LgTagOn::is_ready_() {
   uint8_t status = 0;
@@ -114,13 +119,13 @@ bool LgTagOn::read_response_(uint8_t command, std::vector<uint8_t> &out) {
 // Busy-waits for the ready bit. Only for short commands, which answer within milliseconds.
 bool LgTagOn::wait_ready_(uint32_t timeout_ms) {
   const uint32_t start = millis();
-  while (!this->is_ready_()) {
-    if (millis() - start > timeout_ms) {
-      return false;
+  do {
+    delay(STATUS_INTERVAL_MS);
+    if (this->is_ready_()) {
+      return true;
     }
-    delay(1);
-  }
-  return true;
+  } while (millis() - start <= timeout_ms);
+  return false;
 }
 
 // Sending an ACK frame makes the PN532 drop whatever command it is still working on, so a
@@ -216,6 +221,11 @@ void LgTagOn::loop() {
   if (this->step_ == Step::IDLE) {
     return;
   }
+  const uint32_t now = millis();
+  if (now - this->last_status_check_ < STATUS_INTERVAL_MS) {
+    return;
+  }
+  this->last_status_check_ = now;
   if (!this->is_ready_()) {
     if (millis() - this->step_started_ > this->step_timeout_) {
       this->lose_link_("timed out waiting for the appliance");
