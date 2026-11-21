@@ -228,6 +228,28 @@ static void starts_unreachable_until_a_read_works() {
   CHECK(r.record(true));
 }
 
+static void polls_every_update_while_the_machine_is_on() {
+  PollSchedule schedule(10);
+  for (int i = 0; i < 3; i++) {
+    CHECK(schedule.due(false));
+  }
+}
+
+static void polls_one_update_in_ten_while_the_machine_is_off() {
+  PollSchedule schedule(10);
+  int polls = 0;
+  for (int i = 0; i < 30; i++) {
+    polls += schedule.due(true) ? 1 : 0;
+  }
+  CHECK(polls == 3);
+}
+
+static void polls_right_away_once_the_machine_is_on_again() {
+  PollSchedule schedule(10);
+  CHECK(!schedule.due(true));
+  CHECK(schedule.due(false));
+}
+
 int main() {
   crc_matches_the_dryers_own_records();
   reads_the_model_code();
@@ -247,6 +269,9 @@ int main() {
   rejects_a_felica_error_status();
   one_missed_poll_keeps_the_tag_reachable();
   starts_unreachable_until_a_read_works();
+  polls_every_update_while_the_machine_is_on();
+  polls_one_update_in_ten_while_the_machine_is_off();
+  polls_right_away_once_the_machine_is_on_again();
   if (failures != 0) {
     std::printf("%d check(s) failed\n", failures);
     return 1;

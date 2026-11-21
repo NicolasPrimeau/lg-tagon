@@ -5,6 +5,7 @@
 #include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
 
+#include <cinttypes>
 #include <cstring>
 
 namespace esphome::lg_tagon {
@@ -171,6 +172,7 @@ bool LgTagOn::configure_() {
 }
 
 void LgTagOn::setup() {
+  this->schedule_ = ::tagon::PollSchedule(this->off_update_interval_ / this->get_update_interval());
   // The first command wakes a sleeping PN532 and can fail. If both tries fail, update()
   // keeps trying, so a slow or busy PN532 at boot is not fatal.
   this->configured_ = this->configure_() || this->configure_();
@@ -191,6 +193,9 @@ void LgTagOn::update() {
       return;
     }
     ESP_LOGI(TAG, "PN532 link restored");
+  }
+  if (!this->schedule_.due(this->machine_off_)) {
+    return;
   }
   // FeliCa at 212 kbit/s, polling any system code, asking for the system code back.
   if (!this->send_command_({CMD_IN_LIST_PASSIVE_TARGET, 0x01, 0x01, 0x00, 0xFF, 0xFF, 0x01, 0x00})) {
@@ -285,7 +290,8 @@ void LgTagOn::handle_blocks_(const std::vector<uint8_t> &response) {
   if (this->step_ == Step::READ_HEADER) {
     ESP_LOGD(TAG, "Header: %s", hex_(blocks->data, blocks->size).c_str());
     const auto header = ::tagon::parse_header(blocks->data, blocks->size);
-    if (header && !header->powered) {
+    this->machine_off_ = header && !header->powered;
+    if (this->machine_off_) {
       // Only the header answers while the machine is off; say so instead of failing reads.
       this->publish_off_();
       this->finish_(true);
@@ -401,6 +407,7 @@ void LgTagOn::dump_config() {
   ESP_LOGCONFIG(TAG, "LG Tag On:");
   LOG_I2C_DEVICE(this);
   LOG_UPDATE_INTERVAL(this);
+  ESP_LOGCONFIG(TAG, "  Update interval while off: %" PRIu32 " s", this->off_update_interval_ / 1000);
   if (!this->configured_) {
     ESP_LOGW(TAG, "  PN532 not responding; check wiring and that its switches select I2C");
   }

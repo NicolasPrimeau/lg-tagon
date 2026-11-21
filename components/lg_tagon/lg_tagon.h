@@ -35,6 +35,7 @@ class LgTagOn : public PollingComponent, public i2c::I2CDevice {
   void set_running_sensor(binary_sensor::BinarySensor *s) { running_ = s; }
   void set_door_lock_sensor(binary_sensor::BinarySensor *s) { door_lock_ = s; }
   void set_child_lock_sensor(binary_sensor::BinarySensor *s) { child_lock_ = s; }
+  void set_off_update_interval(uint32_t ms) { off_update_interval_ = ms; }
   void set_reachable_sensor(binary_sensor::BinarySensor *s) { reachable_ = s; }
 
  protected:
@@ -66,6 +67,9 @@ class LgTagOn : public PollingComponent, public i2c::I2CDevice {
   ::tagon::Appliance appliance_{::tagon::Appliance::UNKNOWN};
   bool configured_{false};
   ::tagon::Reachability reachability_;
+  ::tagon::PollSchedule schedule_{1};
+  uint32_t off_update_interval_{300000};
+  bool machine_off_{false};
 
   text_sensor::TextSensor *status_{nullptr};
   text_sensor::TextSensor *model_{nullptr};

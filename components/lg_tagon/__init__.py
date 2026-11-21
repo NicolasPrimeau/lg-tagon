@@ -88,6 +88,8 @@ CONFIG_SCHEMA = (
     cv.Schema(
         {
             cv.GenerateID(): cv.declare_id(LgTagOn),
+            # While the machine is off, poll this often instead of every update_interval.
+            cv.Optional("off_update_interval", default="5min"): cv.positive_time_period_milliseconds,
             **{cv.Optional(key): schema for key, schema in TEXT_SENSORS.items()},
             **{cv.Optional(key): schema for key, schema in SENSORS.items()},
             **{cv.Optional(key): _code for key in FIELDS},
@@ -103,6 +105,7 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
     await i2c.register_i2c_device(var, config)
+    cg.add(var.set_off_update_interval(config["off_update_interval"]))
     for key, setter in SETTERS.items():
         if key not in config:
             continue

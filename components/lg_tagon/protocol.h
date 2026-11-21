@@ -269,6 +269,26 @@ class Reachability {
   bool seen_{false};
 };
 
+// Which updates poll the tag. Every one while the machine is on; while it is off, one in
+// `off_every`, since nothing changes and each exchange is a chance for the PN532 to freeze
+// (the dryer's froze only while off). Turning the machine on shows at the next slow poll.
+class PollSchedule {
+ public:
+  explicit PollSchedule(uint32_t off_every) : off_every_(off_every < 1 ? 1 : off_every) {}
+
+  bool due(bool machine_off) {
+    if (!machine_off || ++skipped_ >= off_every_) {
+      skipped_ = 0;
+      return true;
+    }
+    return false;
+  }
+
+ private:
+  uint32_t off_every_;
+  uint32_t skipped_{0};
+};
+
 // The model block is [length][name][crc low][crc high], CRC over length and name
 // (CommonCommand.get_ModelName). The dryer's name starts with a 0x14 byte; skip control bytes.
 inline std::optional<std::string> decode_model(const uint8_t *data, size_t size) {
