@@ -39,6 +39,9 @@ i2c:
   sda: GPIO21
   scl: GPIO22
   frequency: 100kHz
+  # The PN532 holds SCL low (clock stretching) while it works. The default wait is too short:
+  # the ESP32 gives up mid-transfer and the PN532 is left stuck. 13 ms is the most ESP-IDF allows.
+  timeout: 13ms
 
 lg_tagon:
   # Each poll makes the dryer beep. Raise this if 30 s is too often.
