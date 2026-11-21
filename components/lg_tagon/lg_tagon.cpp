@@ -11,6 +11,18 @@ namespace esphome::lg_tagon {
 
 static const char *const TAG = "lg_tagon";
 
+// Bytes as "83.76.22", for logs and the raw sensor.
+static std::string hex_(const uint8_t *data, size_t size) {
+  if (size == 0) {
+    return {};
+  }
+  std::string text(format_hex_pretty_size(size), '\0');
+  format_hex_pretty_to(text.data(), text.size(), data, size, '.');
+  text.resize(size * 3 - 1);
+  return text;
+}
+
+
 static constexpr uint8_t CMD_GET_FIRMWARE = 0x02;
 static constexpr uint8_t CMD_SAM_CONFIGURATION = 0x14;
 static constexpr uint8_t CMD_RF_CONFIGURATION = 0x32;
@@ -59,7 +71,7 @@ bool LgTagOn::send_command_(const std::vector<uint8_t> &data) {
   static const uint8_t EXPECTED[] = {0x00, 0x00, 0xFF, 0x00, 0xFF, 0x00};
   if (err != i2c::ERROR_OK || memcmp(ack + 1, EXPECTED, sizeof(EXPECTED)) != 0) {
     ESP_LOGW(TAG, "Command 0x%02X: bad acknowledgement (error %d): %s", data[0], err,
-             format_hex_pretty(ack, sizeof(ack)).c_str());
+             hex_(ack, sizeof(ack)).c_str());
     return false;
   }
   return true;
@@ -231,7 +243,7 @@ void LgTagOn::handle_poll_(const std::vector<uint8_t> &response) {
     return;
   }
   std::copy(response.begin() + 4, response.begin() + 12, this->idm_.begin());
-  ESP_LOGD(TAG, "Poll response: %s", format_hex_pretty(response.data(), response.size()).c_str());
+  ESP_LOGD(TAG, "Poll response: %s", hex_(response.data(), response.size()).c_str());
   this->request_blocks_(Step::READ_HEADER, ::tagon::HEADER_BLOCK, 1, ::tagon::MEMORY_MODE);
 }
 
@@ -256,12 +268,12 @@ void LgTagOn::handle_blocks_(const std::vector<uint8_t> &response) {
       ::tagon::parse_read_response(response.data() + 1, response.size() - 1, this->blocks_requested_);
   if (!blocks) {
     ESP_LOGW(TAG, "The appliance refused the read of %u block(s): %s", this->blocks_requested_,
-             format_hex_pretty(response.data(), response.size()).c_str());
+             hex_(response.data(), response.size()).c_str());
     this->finish_(false);
     return;
   }
   if (this->step_ == Step::READ_HEADER) {
-    ESP_LOGD(TAG, "Header: %s", format_hex_pretty(blocks->data, blocks->size).c_str());
+    ESP_LOGD(TAG, "Header: %s", hex_(blocks->data, blocks->size).c_str());
     const auto header = ::tagon::parse_header(blocks->data, blocks->size);
     if (header && !header->powered) {
       // Only the header answers while the machine is off; say so instead of failing reads.
@@ -291,7 +303,7 @@ void LgTagOn::handle_blocks_(const std::vector<uint8_t> &response) {
   }
   const auto state = ::tagon::decode_monitoring(blocks->data, blocks->size);
   if (this->raw_ != nullptr) {
-    this->raw_->publish_state(format_hex_pretty(blocks->data, blocks->size));
+    this->raw_->publish_state(hex_(blocks->data, blocks->size));
   }
   if (!state) {
     ESP_LOGW(TAG, "Monitoring block failed its checksum");
